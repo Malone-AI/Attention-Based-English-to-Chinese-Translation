@@ -7,6 +7,9 @@ import pandas as pd
 from collections import Counter
 import pickle
 from tqdm import tqdm
+from config import get_args
+import warnings
+warnings.filterwarnings("ignore")
 
 # 特殊标记
 PAD_TOKEN = '<pad>'
@@ -187,21 +190,31 @@ def load_model(path, vocab_path, INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM
     return model, vocab['src_vocab'], vocab['tgt_vocab']
 
 # 翻译函数
-def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=1000):
+
+def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=100):
     model.eval()
     with torch.no_grad():
+        # 预处理输入句子
         src_tokens = [src_vocab.get(word, src_vocab[UNK_TOKEN]) for word in sentence.split()]
         src_tensor = torch.tensor(src_tokens).unsqueeze(0).to(device)  # [1, src_len]
+
+        # 编码器输出
         encoder_outputs, hidden = model.encoder(src_tensor)
-        input = torch.tensor([tgt_vocab[SOS_TOKEN]]).to(device)  # <sos>
+
+        # 初始化解码器输入为 <sos>
+        input = torch.tensor([tgt_vocab[SOS_TOKEN]]).to(device)
         translated = []
+
         for _ in range(max_len):
             output, hidden = model.decoder(input, hidden, encoder_outputs)
             top1 = output.argmax(1).item()
+
             if top1 == tgt_vocab[EOS_TOKEN]:
                 break
+
             translated.append(next((k for k, v in tgt_vocab.items() if v == top1), UNK_TOKEN))
             input = torch.tensor([top1]).to(device)
+
         return ''.join(translated)
 
 # 示例使用
@@ -226,7 +239,7 @@ if __name__ == "__main__":
     ENC_EMB_DIM = 256
     DEC_EMB_DIM = 256
     HID_DIM = 512
-    NUM_EPOCHS = 1000
+    NUM_EPOCHS = 10
 
     # 设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -252,6 +265,6 @@ if __name__ == "__main__":
     model, src_vocab, tgt_vocab = load_model('model.pth', 'vocab.pkl', INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM, HID_DIM, device)
 
     # 进行翻译
-    test_sentence = "Tourism"
+    test_sentence = "Cognitive Computing "
     translation = translate(test_sentence, model, src_vocab, tgt_vocab, device)
     print(f"翻译结果: {translation}")
