@@ -15,7 +15,6 @@ This is an English-to-Chinese translation application built with Flask, aimed at
 
 ```
 Project/
-├── .gitignore
 ├── app.py
 ├── config.py
 ├── demo.py

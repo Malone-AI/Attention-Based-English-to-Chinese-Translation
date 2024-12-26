@@ -16,7 +16,6 @@
 
 ```
 Project/
-├── .gitignore
 ├── app.py
 ├── config.py
 ├── demo.py
