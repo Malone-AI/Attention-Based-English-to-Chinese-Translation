@@ -169,7 +169,7 @@ def train_model(model, dataloader, optimizer, criterion, device, num_epochs=10):
             optimizer.step()
             epoch_loss += loss.item()
         avg_loss = epoch_loss / len(dataloader)
-        print(f"Epoch {epoch+1}/{num_epochs} Loss: {avg_loss:.4f}")
+    print(f"Loss: {avg_loss:.4f}")
 
 # 保存模型和词汇表
 def save_model(model, src_vocab, tgt_vocab, path='model.pth', vocab_path='vocab.pkl'):
@@ -233,7 +233,7 @@ if __name__ == "__main__":
         tgt_sentences = f.readlines()
 
     # 确保两者长度相同
-    assert len(src_sentences) == len(tgt_sentences), "源语言和目标语言句子数量不匹配"
+    assert len(src_sentences) == len(tgt_sentences), "The number of sentences in the source language and target language does not match"
 
     # 创建句子对，并去除空行
     sentence_pairs = [
@@ -244,10 +244,10 @@ if __name__ == "__main__":
     # 如果指定了最大句子对数量，则进行截取
     if args.max_pairs is not None:
         if args.max_pairs < len(sentence_pairs):
-            sentence_pairs = random.sample(sentence_pairs, args.max_pairs)
-            print(f"已随机选择 {args.max_pairs} 句子对用于训练")
+            sentence_pairs = sentence_pairs[:args.max_pairs]
+            print(f"Randomly selected {args.max_pairs} sentence pairs for training.")
         else:
-            print(f"指定的最大句子对数量 {args.max_pairs} 大于或等于总句子对数量。将使用全部句子对。")
+            print(f"The specified maximum number of sentence pairs {args.max_pairs} is greater than or equal to the total number of sentence pairs. All sentence pairs will be used.")
 
     src_sentences, tgt_sentences = zip(*sentence_pairs)
 
@@ -288,6 +288,6 @@ if __name__ == "__main__":
     save_model(model, src_vocab, tgt_vocab, path=args.model_path, vocab_path=args.vocab_path)
 
     # 进行翻译测试
-    test_sentence = "I will try it."
+    test_sentence = "Let's try it"
     translation = translate(test_sentence, model, src_vocab, tgt_vocab, device)
     print(f"Translation Result: {translation}")
