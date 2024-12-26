@@ -38,7 +38,7 @@ Project/
 ## Running the Project
 1. **Clone the Project**
     ```
-    git clone 
+    git clone https://github.com/Malone-AI/Attention-Based-English-to-Chinese-Translation.git
     ```
 2. **Install Dependencies**
    
