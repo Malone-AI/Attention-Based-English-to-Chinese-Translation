@@ -1,14 +1,16 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 import jieba
-import pandas as pd
 from collections import Counter
 import pickle
 from tqdm import tqdm
 from config import get_args
 import warnings
+import random
+
 warnings.filterwarnings("ignore")
 
 # 特殊标记
@@ -60,19 +62,21 @@ class TranslationDataset(Dataset):
 # 自定义 collate_fn 以填充序列
 def collate_fn(batch):
     src_batch, tgt_batch = zip(*batch)
-    src_batch = [torch.tensor(seq) for seq in src_batch]
-    tgt_batch = [torch.tensor(seq) for seq in tgt_batch]
+    src_lengths = [len(seq) for seq in src_batch]
+    tgt_lengths = [len(seq) for seq in tgt_batch]
+    max_src_len = max(src_lengths)
+    max_tgt_len = max(tgt_lengths)
 
-    src_padded = nn.utils.rnn.pad_sequence(src_batch, batch_first=True, padding_value=src_vocab[PAD_TOKEN])
-    tgt_padded = nn.utils.rnn.pad_sequence(tgt_batch, batch_first=True, padding_value=tgt_vocab[PAD_TOKEN])
+    padded_src = [torch.cat([seq, torch.zeros(max_src_len - len(seq)).long()]) for seq in src_batch]
+    padded_tgt = [torch.cat([seq, torch.zeros(max_tgt_len - len(seq)).long()]) for seq in tgt_batch]
 
-    return src_padded, tgt_padded
+    return torch.stack(padded_src), torch.stack(padded_tgt)
 
 # 模型定义
 class Encoder(nn.Module):
     def __init__(self, input_dim, emb_dim, hid_dim):
         super(Encoder, self).__init__()
-        self.embedding = nn.Embedding(input_dim, emb_dim, padding_idx=src_vocab[PAD_TOKEN])
+        self.embedding = nn.Embedding(input_dim, emb_dim)
         self.rnn = nn.GRU(emb_dim, hid_dim, batch_first=True)
 
     def forward(self, src):
@@ -89,19 +93,23 @@ class Attention(nn.Module):
     def forward(self, hidden, encoder_outputs):
         # hidden: [batch_size, hid_dim]
         # encoder_outputs: [batch_size, src_len, hid_dim]
-        src_len = encoder_outputs.size(1)
+        batch_size = encoder_outputs.shape[0]
+        src_len = encoder_outputs.shape[1]
+
         hidden = hidden.unsqueeze(1).repeat(1, src_len, 1)  # [batch_size, src_len, hid_dim]
         energy = torch.tanh(self.attn(torch.cat((hidden, encoder_outputs), dim=2)))  # [batch_size, src_len, hid_dim]
         attention = self.v(energy).squeeze(2)  # [batch_size, src_len]
-        return torch.softmax(attention, dim=1)  # [batch_size, src_len]
+        return torch.softmax(attention, dim=1)
 
 class Decoder(nn.Module):
     def __init__(self, output_dim, emb_dim, hid_dim, attention):
         super(Decoder, self).__init__()
-        self.embedding = nn.Embedding(output_dim, emb_dim, padding_idx=tgt_vocab[PAD_TOKEN])
+        self.output_dim = output_dim
         self.attention = attention
-        self.rnn = nn.GRU(emb_dim + hid_dim, hid_dim, batch_first=True)
-        self.fc_out = nn.Linear(hid_dim * 2, output_dim)
+
+        self.embedding = nn.Embedding(output_dim, emb_dim)
+        self.rnn = nn.GRU(emb_dim + hid_dim, hid_dim, batch_first=True)  # 修改后的输入维度
+        self.fc_out = nn.Linear((hid_dim * 2) + emb_dim, output_dim)
 
     def forward(self, input, hidden, encoder_outputs):
         # input: [batch_size]
@@ -109,20 +117,20 @@ class Decoder(nn.Module):
         # encoder_outputs: [batch_size, src_len, hid_dim]
         input = input.unsqueeze(1)  # [batch_size, 1]
         embedded = self.embedding(input)  # [batch_size, 1, emb_dim]
-        
-        # 移除 decoder 中的第一个维度
-        hidden = hidden.squeeze(0)  # [batch_size, hid_dim]
-        a = self.attention(hidden, encoder_outputs)  # [batch_size, src_len]
-        a = a.unsqueeze(1)  # [batch_size, 1, src_len]
-        weighted = torch.bmm(a, encoder_outputs)  # [batch_size, 1, hid_dim]
-        rnn_input = torch.cat((embedded, weighted), dim=2)  # [batch_size, 1, emb_dim + hid_dim]
-        
-        output, hidden = self.rnn(rnn_input, hidden.unsqueeze(0))  # output: [batch_size, 1, hid_dim]
-                                                             # hidden: [1, batch_size, hid_dim]
+
+        attn_weights = self.attention(hidden.squeeze(0), encoder_outputs)  # [batch_size, src_len]
+        attn_weights = attn_weights.unsqueeze(1)  # [batch_size, 1, src_len]
+        context = torch.bmm(attn_weights, encoder_outputs)  # [batch_size, 1, hid_dim]
+
+        rnn_input = torch.cat((embedded, context), dim=2)  # [batch_size, 1, emb_dim + hid_dim]
+        output, hidden = self.rnn(rnn_input, hidden)  # output: [batch_size, 1, hid_dim]
+
         output = output.squeeze(1)  # [batch_size, hid_dim]
-        weighted = weighted.squeeze(1)  # [batch_size, hid_dim]
-        prediction = self.fc_out(torch.cat((output, weighted), dim=1))  # [batch_size, output_dim]
-        return prediction, hidden
+        context = context.squeeze(1)  # [batch_size, hid_dim]
+        embedded = embedded.squeeze(1)  # [batch_size, emb_dim]
+
+        output = self.fc_out(torch.cat((output, context, embedded), dim=1))  # [batch_size, output_dim]
+        return output, hidden
 
 class Seq2Seq(nn.Module):
     def __init__(self, encoder, decoder, device):
@@ -131,23 +139,15 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.device = device
 
-    def forward(self, src, tgt, teacher_forcing_ratio=0.5):
-        # src: [batch_size, src_len]
-        # tgt: [batch_size, tgt_len]
-        batch_size = src.size(0)
-        tgt_len = tgt.size(1)
-        tgt_vocab_size = self.decoder.embedding.num_embeddings
-
-        outputs = torch.zeros(batch_size, tgt_len, tgt_vocab_size).to(self.device)
-
+    def forward(self, src, tgt):
         encoder_outputs, hidden = self.encoder(src)
         input = tgt[:,0]  # <sos>
+        outputs = torch.zeros(tgt.shape[0], tgt.shape[1], self.decoder.output_dim).to(self.device)
 
-        for t in range(1, tgt_len):
+        for t in range(1, tgt.shape[1]):
             output, hidden = self.decoder(input, hidden, encoder_outputs)
             outputs[:,t] = output
-            top1 = output.argmax(1)
-            input = tgt[:,t] if torch.rand(1).item() < teacher_forcing_ratio else top1
+            input = tgt[:,t]
 
         return outputs
 
@@ -170,6 +170,7 @@ def train_model(model, dataloader, optimizer, criterion, device, num_epochs=10):
             epoch_loss += loss.item()
         avg_loss = epoch_loss / len(dataloader)
         # print(f"Epoch {epoch+1}/{num_epochs} Loss: {avg_loss:.4f}")
+    print(f"Loss: {avg_loss:.4f}")
 
 # 保存模型和词汇表
 def save_model(model, src_vocab, tgt_vocab, path='model.pth', vocab_path='vocab.pkl'):
@@ -193,14 +194,11 @@ def load_model(path, vocab_path, INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM
 def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=100):
     model.eval()
     with torch.no_grad():
-        # 预处理输入句子
         src_tokens = [src_vocab.get(word, src_vocab[UNK_TOKEN]) for word in sentence.split()]
         src_tensor = torch.tensor(src_tokens).unsqueeze(0).to(device)  # [1, src_len]
 
-        # 编码器输出
         encoder_outputs, hidden = model.encoder(src_tensor)
 
-        # 初始化解码器输入为 <sos>
         input = torch.tensor([tgt_vocab[SOS_TOKEN]]).to(device)
         translated = []
 
@@ -216,13 +214,39 @@ def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=100):
 
         return ''.join(translated)
 
-# 示例使用
 if __name__ == "__main__":
-    # 加载数据
-    file_path = 'wikititles-v2.zh-en.tsv'
-    df = pd.read_csv(file_path, sep='\t', header=None, names=['zh_sentence', 'en_sentence'])
-    src_sentences = df['en_sentence'][:100].tolist()
-    tgt_sentences = df['zh_sentence'][:100].tolist()
+    # 加载训练参数
+    args = get_args()
+
+    # 定义 Tatoeba 文件路径
+    # cmn_file = os.path.join('./', 'Tatoeba.cmn-en.cmn')
+    # en_file = os.path.join('./', 'Tatoeba.cmn-en.en')
+    # 定义语料库文件路径
+    en_file = os.path.join('.', args.src_corpus)
+    cmn_file = os.path.join('.', args.tgt_corpus)
+
+    # 读取中文和英文句子
+    with open(cmn_file, 'r', encoding='utf-8') as f:
+        cmn_sentences = f.readlines()
+
+    with open(en_file, 'r', encoding='utf-8') as f:
+        en_sentences = f.readlines()
+
+    # 确保两者长度相同
+    assert len(cmn_sentences) == len(en_sentences), "The number of Chinese sentences does not match the number of English sentences"
+
+    # 创建句子对，并去除空行
+    sentence_pairs = [
+        (en.strip(), cmn.strip()) for en, cmn in zip(en_sentences, cmn_sentences)
+        if en.strip() and cmn.strip()
+    ]
+    
+    # 如果指定了最大句子对数量，则进行截取
+    if args.max_pairs is not None:
+        sentence_pairs = sentence_pairs[:args.max_pairs]
+        print(f"The first {args.max_pairs} sentence pairs have been selected for training")
+
+    src_sentences, tgt_sentences = zip(*sentence_pairs)
 
     # 构建词汇表
     src_vocab = build_vocab(src_sentences, is_target=False)
@@ -230,15 +254,15 @@ if __name__ == "__main__":
 
     # 创建数据集和数据加载器
     dataset = TranslationDataset(src_sentences, tgt_sentences, src_vocab, tgt_vocab)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
     # 模型参数
     INPUT_DIM = len(src_vocab)
     OUTPUT_DIM = len(tgt_vocab)
-    ENC_EMB_DIM = 256
-    DEC_EMB_DIM = 256
-    HID_DIM = 512
-    NUM_EPOCHS = 10
+    ENC_EMB_DIM = args.enc_emb_dim
+    DEC_EMB_DIM = args.dec_emb_dim
+    HID_DIM = args.hid_dim
+    NUM_EPOCHS = args.num_epochs
 
     # 设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -250,7 +274,7 @@ if __name__ == "__main__":
     model = Seq2Seq(encoder, decoder, device).to(device)
 
     # 优化器和损失函数
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
     PAD_IDX = tgt_vocab[PAD_TOKEN]
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
 
@@ -258,12 +282,12 @@ if __name__ == "__main__":
     train_model(model, dataloader, optimizer, criterion, device, num_epochs=NUM_EPOCHS)
 
     # 保存模型和词汇表
-    save_model(model, src_vocab, tgt_vocab, path='model.pth', vocab_path='vocab.pkl')
+    save_model(model, src_vocab, tgt_vocab, path=args.model_path, vocab_path=args.vocab_path)
 
     # 加载模型
-    model, src_vocab, tgt_vocab = load_model('model.pth', 'vocab.pkl', INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM, HID_DIM, device)
+    model, src_vocab, tgt_vocab = load_model(args.model_path, args.vocab_path, INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM, HID_DIM, device)
 
     # 进行翻译
-    test_sentence = "I Love Cognitive Computing "
+    test_sentence = "I will try it."
     translation = translate(test_sentence, model, src_vocab, tgt_vocab, device)
     print(f"翻译结果: {translation}")
