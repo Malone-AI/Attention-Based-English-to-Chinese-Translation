@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英文到中文翻译</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 呼吸感动画 */
+        @keyframes breathe {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+            }
+        }
+
+        .breathe {
+            animation: breathe 3s infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+        <h1 class="text-2xl font-bold mb-6 text-center text-blue-600">英文到中文翻译</h1>
+        <textarea id="englishInput" rows="4" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4" placeholder="请输入英文文本..."></textarea>
+        <button id="translateButton" class="w-full bg-blue-500 text-white py-2 px-4 rounded-md breathe hover:bg-blue-600 transition duration-300">翻译</button>
+        <div id="translationResult" class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-md hidden">
+            <h2 class="text-xl font-semibold mb-2 text-green-600">翻译结果:</h2>
+            <p id="chineseOutput" class="text-lg"></p>
+        </div>
+        <div id="errorMessage" class="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md hidden">
+            翻译请求失败，请稍后再试。
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('translateButton').addEventListener('click', async () => {
+            const englishText = document.getElementById('englishInput').value.trim();
+            const translationResult = document.getElementById('translationResult');
+            const chineseOutput = document.getElementById('chineseOutput');
+            const errorMessage = document.getElementById('errorMessage');
+
+            // 清除之前的结果和错误信息
+            translationResult.classList.add('hidden');
+            errorMessage.classList.add('hidden');
+
+            if (englishText === "") {
+                alert("请输入要翻译的英文文本。");
+                return;
+            }
+
+            try {
+                const response = await fetch('/translate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text: englishText })
+                });
+
+                if (!response.ok) {
+                    throw new Error('网络响应不是OK');
+                }
+
+                const data = await response.json();
+                if (data.translation) {
+                    chineseOutput.textContent = data.translation;
+                    translationResult.classList.remove('hidden');
+                } else {
+                    throw new Error(data.error || '未知错误');
+                }
+            } catch (error) {
+                console.error('错误:', error);
+                errorMessage.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

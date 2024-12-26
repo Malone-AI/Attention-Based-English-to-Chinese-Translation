@@ -108,8 +108,8 @@ class Decoder(nn.Module):
         self.attention = attention
 
         self.embedding = nn.Embedding(output_dim, emb_dim)
-        self.rnn = nn.GRU(emb_dim + hid_dim, hid_dim, batch_first=True)  # 修改后的输入维度
-        self.fc_out = nn.Linear((hid_dim * 2) + emb_dim, output_dim)
+        self.rnn = nn.GRU(emb_dim + hid_dim, hid_dim, batch_first=True)
+        self.fc_out = nn.Linear(hid_dim * 2 + emb_dim, output_dim)
 
     def forward(self, input, hidden, encoder_outputs):
         # input: [batch_size]
@@ -169,8 +169,7 @@ def train_model(model, dataloader, optimizer, criterion, device, num_epochs=10):
             optimizer.step()
             epoch_loss += loss.item()
         avg_loss = epoch_loss / len(dataloader)
-        # print(f"Epoch {epoch+1}/{num_epochs} Loss: {avg_loss:.4f}")
-    print(f"Loss: {avg_loss:.4f}")
+        print(f"Epoch {epoch+1}/{num_epochs} Loss: {avg_loss:.4f}")
 
 # 保存模型和词汇表
 def save_model(model, src_vocab, tgt_vocab, path='model.pth', vocab_path='vocab.pkl'):
@@ -182,13 +181,15 @@ def save_model(model, src_vocab, tgt_vocab, path='model.pth', vocab_path='vocab.
 def load_model(path, vocab_path, INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM, HID_DIM, device):
     with open(vocab_path, 'rb') as f:
         vocab = pickle.load(f)
+    src_vocab = vocab['src_vocab']
+    tgt_vocab = vocab['tgt_vocab']
     encoder = Encoder(INPUT_DIM, ENC_EMB_DIM, HID_DIM)
     attention = Attention(HID_DIM)
     decoder = Decoder(OUTPUT_DIM, DEC_EMB_DIM, HID_DIM, attention)
     model = Seq2Seq(encoder, decoder, device).to(device)
     model.load_state_dict(torch.load(path))
     model.eval()
-    return model, vocab['src_vocab'], vocab['tgt_vocab']
+    return model, src_vocab, tgt_vocab
 
 # 翻译函数
 def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=100):
@@ -209,7 +210,9 @@ def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=100):
             if top1 == tgt_vocab[EOS_TOKEN]:
                 break
 
-            translated.append(next((k for k, v in tgt_vocab.items() if v == top1), UNK_TOKEN))
+            # 获取词汇表中对应的词
+            translated_word = next((k for k, v in tgt_vocab.items() if v == top1), UNK_TOKEN)
+            translated.append(translated_word)
             input = torch.tensor([top1]).to(device)
 
         return ''.join(translated)
@@ -218,33 +221,33 @@ if __name__ == "__main__":
     # 加载训练参数
     args = get_args()
 
-    # 定义 Tatoeba 文件路径
-    # cmn_file = os.path.join('./', 'Tatoeba.cmn-en.cmn')
-    # en_file = os.path.join('./', 'Tatoeba.cmn-en.en')
     # 定义语料库文件路径
-    en_file = os.path.join('.', args.src_corpus)
-    cmn_file = os.path.join('.', args.tgt_corpus)
+    src_file = os.path.join('.', args.src_corpus)
+    tgt_file = os.path.join('.', args.tgt_corpus)
 
     # 读取中文和英文句子
-    with open(cmn_file, 'r', encoding='utf-8') as f:
-        cmn_sentences = f.readlines()
+    with open(src_file, 'r', encoding='utf-8') as f:
+        src_sentences = f.readlines()
 
-    with open(en_file, 'r', encoding='utf-8') as f:
-        en_sentences = f.readlines()
+    with open(tgt_file, 'r', encoding='utf-8') as f:
+        tgt_sentences = f.readlines()
 
     # 确保两者长度相同
-    assert len(cmn_sentences) == len(en_sentences), "The number of Chinese sentences does not match the number of English sentences"
+    assert len(src_sentences) == len(tgt_sentences), "源语言和目标语言句子数量不匹配"
 
     # 创建句子对，并去除空行
     sentence_pairs = [
-        (en.strip(), cmn.strip()) for en, cmn in zip(en_sentences, cmn_sentences)
+        (en.strip(), cmn.strip()) for en, cmn in zip(src_sentences, tgt_sentences)
         if en.strip() and cmn.strip()
     ]
-    
+
     # 如果指定了最大句子对数量，则进行截取
     if args.max_pairs is not None:
-        sentence_pairs = sentence_pairs[:args.max_pairs]
-        print(f"The first {args.max_pairs} sentence pairs have been selected for training")
+        if args.max_pairs < len(sentence_pairs):
+            sentence_pairs = random.sample(sentence_pairs, args.max_pairs)
+            print(f"已随机选择 {args.max_pairs} 句子对用于训练")
+        else:
+            print(f"指定的最大句子对数量 {args.max_pairs} 大于或等于总句子对数量。将使用全部句子对。")
 
     src_sentences, tgt_sentences = zip(*sentence_pairs)
 
@@ -254,7 +257,7 @@ if __name__ == "__main__":
 
     # 创建数据集和数据加载器
     dataset = TranslationDataset(src_sentences, tgt_sentences, src_vocab, tgt_vocab)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=4)
 
     # 模型参数
     INPUT_DIM = len(src_vocab)
@@ -284,10 +287,7 @@ if __name__ == "__main__":
     # 保存模型和词汇表
     save_model(model, src_vocab, tgt_vocab, path=args.model_path, vocab_path=args.vocab_path)
 
-    # 加载模型
-    model, src_vocab, tgt_vocab = load_model(args.model_path, args.vocab_path, INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM, HID_DIM, device)
-
-    # 进行翻译
+    # 进行翻译测试
     test_sentence = "I will try it."
     translation = translate(test_sentence, model, src_vocab, tgt_vocab, device)
     print(f"翻译结果: {translation}")
