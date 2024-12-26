@@ -290,4 +290,4 @@ if __name__ == "__main__":
     # 进行翻译测试
     test_sentence = "I will try it."
     translation = translate(test_sentence, model, src_vocab, tgt_vocab, device)
-    print(f"翻译结果: {translation}")
+    print(f"Translation Result: {translation}")
