@@ -190,7 +190,6 @@ def load_model(path, vocab_path, INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM
     return model, vocab['src_vocab'], vocab['tgt_vocab']
 
 # 翻译函数
-
 def translate(sentence, model, src_vocab, tgt_vocab, device, max_len=100):
     model.eval()
     with torch.no_grad():
@@ -265,6 +264,6 @@ if __name__ == "__main__":
     model, src_vocab, tgt_vocab = load_model('model.pth', 'vocab.pkl', INPUT_DIM, OUTPUT_DIM, ENC_EMB_DIM, DEC_EMB_DIM, HID_DIM, device)
 
     # 进行翻译
-    test_sentence = "Cognitive Computing "
+    test_sentence = "I Love Cognitive Computing "
     translation = translate(test_sentence, model, src_vocab, tgt_vocab, device)
     print(f"翻译结果: {translation}")
