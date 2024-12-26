@@ -39,7 +39,7 @@ Project/
 ## 运行项目
 1.Clone 项目
 ```
-git clone 
+git clone https://github.com/Malone-AI/Attention-Based-English-to-Chinese-Translation.git
 ```
 2.安装依赖
 
