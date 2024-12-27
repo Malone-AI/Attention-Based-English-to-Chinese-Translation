@@ -7,7 +7,6 @@
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 呼吸感动画 */
         @keyframes breathe {
             0%, 100% {
                 transform: scale(1);
@@ -15,21 +14,40 @@
             }
             50% {
                 transform: scale(1.05);
-                box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+                box-shadow: 0 0 0 20px rgba(59, 130, 246, 0);
             }
         }
 
         .breathe {
             animation: breathe 3s infinite;
         }
+
+        /* 毛玻璃效果 */
+        .backdrop-blur {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        textarea::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        textarea::-webkit-scrollbar-thumb {
+            background-color: rgba(59, 130, 246, 0.7);
+            border-radius: 4px;
+        }
+
+        textarea::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-    <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
-        <h1 class="text-2xl font-bold mb-6 text-center text-blue-600">英文到中文翻译</h1>
+<body class="bg-gradient-to-r from-blue-400 to-purple-500 flex items-center justify-center min-h-screen">
+    <div class="backdrop-blur p-8 rounded-lg shadow-lg max-w-md w-full">
+        <h1 class="text-3xl font-bold mb-6 text-center text-white">英文到中文翻译</h1>
         <textarea id="englishInput" rows="4" class="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4" placeholder="请输入英文文本..."></textarea>
         <button id="translateButton" class="w-full bg-blue-500 text-white py-2 px-4 rounded-md breathe hover:bg-blue-600 transition duration-300">翻译</button>
-        <div id="translationResult" class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-md hidden">
+        <div id="translationResult" class="mt-6 p-4 bg-white bg-opacity-50 border border-gray-200 rounded-md hidden">
             <h2 class="text-xl font-semibold mb-2 text-green-600">翻译结果:</h2>
             <p id="chineseOutput" class="text-lg"></p>
         </div>
